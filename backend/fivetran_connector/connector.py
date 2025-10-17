@@ -1,6 +1,7 @@
 import json
 import requests
 import fitz  # PyMuPDF
+import feedparser
 import datetime
 from fivetran_connector_sdk.connector import Connector
 
@@ -26,34 +27,22 @@ def schema(configuration: dict) -> dict:
 
 # The core of the connector. It fetches the data from the source.
 def sync(configuration: dict, state: dict, schema: dict) -> dict:
-    # For this example, we'll use a static URL to a sample PDF.
-    # In a real implementation, this would dynamically find PDFs from a target site.
+    # --- 1. PDF Data Source ---
     sample_pdf_url = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
-    
-    print(f"Downloading PDF from {sample_pdf_url}")
-    
+    print(f"Syncing PDF from {sample_pdf_url}")
     try:
-        # Download the PDF content
         response = requests.get(sample_pdf_url)
-        response.raise_for_status()  # Raise an exception for bad status codes
+        response.raise_for_status()
         pdf_bytes = response.content
-
-        # Extract text using PyMuPDF (fitz)
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        full_text = ""
-        for page in doc:
-            full_text += page.get_text()
-        
+        full_text = "".join(page.get_text() for page in doc)
         doc.close()
-        
         print(f"Successfully extracted {len(full_text)} characters from PDF.")
-
-        # Yield the extracted data in the format Fivetran expects
         yield {
             "insert": {
                 "documents": [
                     {
-                        "id": sample_pdf_url, # Use URL as a unique ID for this example
+                        "id": sample_pdf_url,
                         "source_url": sample_pdf_url,
                         "source_type": "PDF_Minutes",
                         "retrieved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -62,14 +51,37 @@ def sync(configuration: dict, state: dict, schema: dict) -> dict:
                 ]
             }
         }
-
-    except requests.exceptions.RequestException as e:
-        print(f"Error downloading PDF: {e}")
-        # Optionally, you could yield an error message to Fivetran
-        yield {"log": {"level": "ERROR", "message": f"Failed to download PDF from {sample_pdf_url}: {e}"}}
     except Exception as e:
-        print(f"Error processing PDF: {e}")
         yield {"log": {"level": "ERROR", "message": f"Failed to process PDF from {sample_pdf_url}: {e}"}}
+
+    # --- 2. RSS Feed Data Source ---
+    # For this example, we'll use a static URL to a sample RSS feed.
+    sample_rss_url = "http://feeds.bbci.co.uk/news/rss.xml"
+    print(f"Syncing RSS from {sample_rss_url}")
+    try:
+        feed = feedparser.parse(sample_rss_url)
+        print(f"Found {len(feed.entries)} articles in RSS feed.")
+        
+        articles = []
+        for entry in feed.entries:
+            articles.append({
+                "id": entry.id,
+                "source_url": entry.link,
+                "source_type": "News_Article",
+                "retrieved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "content": f"{entry.title}\n\n{entry.summary}"
+            })
+        
+        # Yield all articles from this source in a single batch
+        if articles:
+            yield {
+                "insert": {
+                    "documents": articles
+                }
+            }
+
+    except Exception as e:
+        yield {"log": {"level": "ERROR", "message": f"Failed to process RSS feed from {sample_rss_url}: {e}"}}
 
 # The main entry point for the Fivetran connector
 if __name__ == "__main__":

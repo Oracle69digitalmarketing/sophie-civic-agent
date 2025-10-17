@@ -1,3 +1,4 @@
 fivetran-connector-sdk
 requests
 PyMuPDF
+feedparser
